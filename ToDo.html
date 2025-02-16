@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>To-Do Liste</title>
+    <link rel="stylesheet" href="ToDo.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Meine To-Do Liste</h1>
+        
+        <div class="input-section">
+            <input type="text" id="todoInput" placeholder="Neue Aufgabe eingeben...">
+            <button onclick="addTodo()">Hinzufügen</button>
+        </div>
+
+        <div class="toggle-section">
+            <span>Erledigte Aufgaben anzeigen</span>
+            <label class="switch">
+                <input type="checkbox" id="showCompleted" onchange="toggleCompletedVisibility()">
+                <span class="slider round"></span>
+            </label>
+        </div>
+
+        <ul id="todoList"></ul>
+        <div id="completedSection" style="display: none;">
+            <h2>Erledigte Aufgaben</h2>
+            <ul id="completedList"></ul>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/.netlify/functions/todos';
+
+        // Laden der gespeicherten Todos beim Start
+        document.addEventListener('DOMContentLoaded', loadTodos);
+
+        async function addTodo() {
+            const input = document.getElementById('todoInput');
+            const text = input.value.trim();
+            
+            if (text !== '') {
+                const todo = {
+                    text: text,
+                    completed: false
+                };
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(todo)
+                    });
+                    
+                    const savedTodo = await response.json();
+                    const todoData = { 
+                        id: savedTodo.ref.id, 
+                        ...savedTodo.data 
+                    };
+                    const li = createTodoElement(todoData);
+                    document.getElementById('todoList').appendChild(li);
+                    input.value = '';
+                } catch (error) {
+                    console.error('Error adding todo:', error);
+                }
+            }
+        }
+
+        async function toggleTodo(checkbox) {
+            const li = checkbox.parentElement.parentElement;
+            const todoText = checkbox.parentElement.previousElementSibling;
+            const todoId = li.dataset.id;
+            const completed = checkbox.checked;
+
+            try {
+                const response = await fetch(`${API_URL}/${todoId}`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ completed })
+                });
+
+                if (response.ok) {
+                    todoText.classList.toggle('completed');
+                    
+                    if (completed) {
+                        // Füge Fade-out Animation hinzu
+                        li.classList.add('fade-out');
+                        
+                        // Warte auf das Ende der Animation
+                        setTimeout(() => {
+                            li.classList.remove('fade-out');
+                            document.getElementById('completedList').appendChild(li);
+                            li.style.opacity = '1';
+                            li.style.transform = 'translateX(0)';
+                        }, 500); // Entspricht der Animationsdauer in CSS
+                    } else {
+                        document.getElementById('todoList').appendChild(li);
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating todo:', error);
+                checkbox.checked = !completed; // Revert checkbox if error
+            }
+        }
+
+        async function deleteTodo(button) {
+            const li = button.parentElement.parentElement;
+            const todoId = li.dataset.id;
+
+            try {
+                const response = await fetch(`${API_URL}/${todoId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    // Füge Fade-out Animation hinzu
+                    li.classList.add('delete-fade-out');
+                    
+                    // Warte auf das Ende der Animation bevor das Element entfernt wird
+                    setTimeout(() => {
+                        li.remove();
+                    }, 500); // Entspricht der Animationsdauer in CSS
+                }
+            } catch (error) {
+                console.error('Error deleting todo:', error);
+            }
+        }
+
+        function createTodoElement(todo) {
+            const li = document.createElement('li');
+            li.dataset.id = todo.id;
+            li.innerHTML = `
+                <span class="todo-text ${todo.completed ? 'completed' : ''}" onclick="editTodo(this)">${todo.text}</span>
+                <div class="todo-actions">
+                    <input type="checkbox" onchange="toggleTodo(this)" ${todo.completed ? 'checked' : ''}>
+                    <button onclick="deleteTodo(this)">Löschen</button>
+                </div>
+            `;
+            return li;
+        }
+
+        async function editTodo(span) {
+            const originalText = span.textContent;
+            const li = span.parentElement;
+            const todoId = li.dataset.id;
+            
+            // Erstelle Input-Feld
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.value = originalText;
+            input.className = 'edit-input';
+            
+            // Ersetze span mit input
+            span.replaceWith(input);
+            input.focus();
+            
+            // Speichern bei Enter oder Verlust des Fokus
+            const saveEdit = async () => {
+                const newText = input.value.trim();
+                if (newText && newText !== originalText) {
+                    try {
+                        const response = await fetch(`${API_URL}/${todoId}`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({ text: newText })
+                        });
+
+                        if (response.ok) {
+                            span.textContent = newText;
+                        }
+                    } catch (error) {
+                        console.error('Error updating todo:', error);
+                        span.textContent = originalText;
+                    }
+                } else {
+                    span.textContent = originalText;
+                }
+                input.replaceWith(span);
+            };
+
+            // Abbrechen bei Escape
+            const cancelEdit = () => {
+                span.textContent = originalText;
+                input.replaceWith(span);
+            };
+
+            input.addEventListener('blur', saveEdit);
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveEdit();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelEdit();
+                }
+            });
+        }
+
+        async function loadTodos() {
+            try {
+                const response = await fetch(API_URL);
+                const todos = await response.json();
+                
+                const todoList = document.getElementById('todoList');
+                const completedList = document.getElementById('completedList');
+                
+                todoList.innerHTML = '';
+                completedList.innerHTML = '';
+                
+                todos.forEach(todo => {
+                    const li = createTodoElement(todo);
+                    if (todo.completed) {
+                        completedList.appendChild(li);
+                    } else {
+                        todoList.appendChild(li);
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading todos:', error);
+            }
+        }
+
+        function toggleCompletedVisibility() {
+            const completedSection = document.getElementById('completedSection');
+            completedSection.style.display = document.getElementById('showCompleted').checked ? 'block' : 'none';
+        }
+
+        // Enter-Taste zum Hinzufügen
+        document.getElementById('todoInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addTodo();
+            }
+        });
+    </script>
+</body>
+</html>

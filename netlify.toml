@@ -1,0 +1,8 @@
+[build]
+  functions = "functions"
+  publish = "."
+
+[[redirects]]
+  from = "/*"
+  to = "/ToDo.html"
+  status = 200 
